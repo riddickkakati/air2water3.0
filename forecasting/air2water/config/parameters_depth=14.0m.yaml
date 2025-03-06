@@ -1,0 +1,36 @@
+Optimizer:
+  Method: SpotPY
+  model: air2water
+  parameters:
+    a1:
+      distribution: Uniform
+      high: 2.0
+      low: -0.8476020689157209
+    a2:
+      distribution: Uniform
+      high: 0.24909203148680442
+      low: 0.008388937539474815
+    a3:
+      distribution: Uniform
+      high: 0.9856289379756539
+      low: 0.014248830949940743
+    a4:
+      distribution: Uniform
+      high: 39.70591307762042
+      low: 1.0
+    a5:
+      distribution: Uniform
+      high: 14.511558084278722
+      low: 0.0
+    a6:
+      distribution: Uniform
+      high: 1.0
+      low: 0.0
+    a7:
+      distribution: Uniform
+      high: 150.0
+      low: 0.0
+    a8:
+      distribution: Uniform
+      high: 0.5
+      low: 0.0
