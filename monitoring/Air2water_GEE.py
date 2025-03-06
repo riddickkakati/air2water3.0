@@ -747,17 +747,17 @@ class Air2water_monit:
             color_palette = ['#313695', '#4575B4', '#74ADD1', '#ABD9E9', '#E0F3F8',
                              '#FFFFBF', '#FEE090', '#FDAE61', '#F46D43', '#D73027', '#A50026']
             legend_title = 'Chlorophyll-a (NDCI)'
-            value_range = [-1,1]  # Adjust based on typical Chl-a values
+            value_range = [-1, 1]  # Fallback range if statistics fail
         elif self.variable == 2:  # Turbidity
             color_palette = ['#313695', '#4575B4', '#74ADD1', '#ABD9E9', '#E0F3F8',
                              '#FFFFBF', '#FEE090', '#FDAE61', '#F46D43', '#D73027', '#A50026']
             legend_title = 'Turbidity (NDTI)'
-            value_range = [-1,1]  # Adjust based on typical turbidity values
+            value_range = [-1, 1]  # Fallback range if statistics fail
         else:  # Dissolved Oxygen
             color_palette = ['#A50026', '#D73027', '#F46D43', '#FDAE61', '#FEE090',
                              '#FFFFBF', '#E0F3F8', '#ABD9E9', '#74ADD1', '#4575B4', '#313695']
             legend_title = 'Dissolved Oxygen (mg/L)'
-            value_range = [0,20]  # Adjust based on typical DO values
+            value_range = [0, 20]  # Fallback range if statistics fail
 
         # Get and process satellite data
         if self.satellite == 1:
@@ -792,10 +792,67 @@ class Air2water_monit:
                 result = ee.ImageCollection(self.DO_Sentinel(Reflectance).get('Dissolvedoxygen'))
                 layer_name = 'Dissolved Oxygen'
 
-                # Generate thumbnail with the same value range for both visualizations
+            # Get statistics from the image for dynamic visualization range
+            try:
+                # First, debug what band names are actually present
+                first_image = result.first()
+                print("Available bands:", first_image.bandNames().getInfo())
+
+                # Select the first band and rename it to 'value' for consistent analytics
+                # This is important because we don't know exactly what the band is named in the result
+                first_band = first_image.bandNames().get(0)
+                image_with_renamed_band = first_image.select([first_band], ['value'])
+
+                # Create combined reducer for mean and standard deviation
+                meanStdDev = ee.Reducer.mean().combine(
+                    reducer2=ee.Reducer.stdDev(),
+                    sharedInputs=True
+                ).setOutputs(['mean', 'stddev'])
+
+                # Calculate mean and standard deviation of the image values
+                stats = image_with_renamed_band.reduceRegion(
+                    reducer=meanStdDev,
+                    geometry=shapefile.geometry(),
+                    scale=30,
+                    bestEffort=True,
+                    maxPixels=1e10
+                )
+
+                print("Stats:", stats.getInfo())  # Debug the stats dictionary
+
+                # Number of standard deviations to use for visualization range
+                num_stddev = 2.5
+
+                # Calculate min and max values for visualization based on mean and stddev
+                vis_min = ee.Number(stats.get('value_mean')).subtract(
+                    ee.Number(num_stddev).multiply(ee.Number(stats.get('value_stddev'))))
+                vis_max = ee.Number(stats.get('value_mean')).add(
+                    ee.Number(num_stddev).multiply(ee.Number(stats.get('value_stddev'))))
+
+                # Ensure we have real values for vis_min and vis_max
+                vis_min_value = vis_min.getInfo()
+                vis_max_value = vis_max.getInfo()
+
+                print(f"Dynamic range: min={vis_min_value}, max={vis_max_value}")
+
+                # Check if the values are valid
+                if (vis_min_value is None or vis_max_value is None or
+                        not np.isfinite(vis_min_value) or not np.isfinite(vis_max_value) or
+                        vis_min_value >= vis_max_value):
+                    raise ValueError("Invalid statistics values")
+
+            except Exception as e:
+                print(f"Error calculating dynamic range: {str(e)}")
+                # Fallback to predefined range if any error occurs
+                vis_min_value = value_range[0]
+                vis_max_value = value_range[1]
+
+            print(f"Final visualization range: min={vis_min_value}, max={vis_max_value}")
+
+            # Generate thumbnail with the calculated value range
             thumb_url = result.first().getThumbUrl({
-                'min': value_range[0],
-                'max': value_range[1],
+                'min': vis_min_value,
+                'max': vis_max_value,
                 'dimensions': 1024,
                 'format': 'png',
                 'palette': color_palette
@@ -820,9 +877,9 @@ class Air2water_monit:
             # Create a custom colorbar with the actual value range
             cbar = plt.colorbar(shrink=0.8, label=legend_title)
 
-            # Set the colorbar ticks to match the value range specified
+            # Set the colorbar ticks to match the calculated value range
             old_ticks = np.linspace(0, 255, 6)
-            new_tick_values = np.linspace(value_range[0], value_range[1], 6)
+            new_tick_values = np.linspace(vis_min_value, vis_max_value, 6)
             cbar.set_ticks(old_ticks)
             cbar.set_ticklabels([f"{v:.2f}" for v in new_tick_values])
 
@@ -832,10 +889,10 @@ class Air2water_monit:
                 f"{owd}/monitoring_results/{self.user_id}_{self.group_id}/{self.satellite}_{self.variable}_{self.sim_id}.png",
                 dpi=100)
 
-            # Add result as a tile layer - using the same value range
+            # Add result as a tile layer - using the same dynamic value range
             map_id_dict = result.first().getMapId({
-                'min': value_range[0],
-                'max': value_range[1],
+                'min': vis_min_value,
+                'max': vis_max_value,
                 'palette': color_palette
             })
 
@@ -847,8 +904,8 @@ class Air2water_monit:
                 control=True
             ).add_to(m)
 
-            # Add colormap legend with the same values as in the plot
-            legend_vals = np.linspace(value_range[1], value_range[0], len(color_palette))
+            # Add colormap legend with the dynamically calculated values
+            legend_vals = np.linspace(vis_max_value, vis_min_value, len(color_palette))
             legend_vals = ['{:.2f}'.format(v) for v in legend_vals]
 
             legend_html = '''
