@@ -1,4 +1,4 @@
-# Aqualite Engine 1.0
+# Aqualite Engine Backend
 
 ## 🌊 About The Project
 
